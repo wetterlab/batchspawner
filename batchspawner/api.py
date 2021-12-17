@@ -10,6 +10,18 @@ class BatchSpawnerAPIHandler(APIHandler):
         if hasattr(self, "current_user"):
             # Jupyterhub compatability, (september 2018, d79a99323ef1d)
             user = self.current_user
+            spawner = user.spawner
+            data = self.get_json_body()
+            port = int(data.get('port', 0))
+            try:
+                from wrapspawner import WrapSpawner
+                if isinstance(spawner, WrapSpawner):
+                    spawner = spawner.child_spawner
+            except:
+                self.log.info('Exception finding wrapped spawner')
+                import traceback
+                traceback.print_exc()
+            spawner.port = port
         else:
             # Previous jupyterhub, 0.9.4 and before.
             user = self.get_current_user()
