@@ -1,47 +1,30 @@
-import os
-import sys
 import json
-import asyncio
-
-from runpy import run_path
-from shutil import which
-
-import jupyterhub
-from jupyterhub.utils import random_port, url_path_join
-from jupyterhub.services.auth import HubAuth
-
-JH_MAJOR_VERSION, _, _ = jupyterhub.__version__.split('.')
+from tornado import web
+from jupyterhub.apihandlers import APIHandler, default_handlers
 
 
-def main(argv=None):
-    port = random_port()
-    hub_auth = HubAuth()
-    hub_auth.client_ca = os.environ.get("JUPYTERHUB_SSL_CLIENT_CA", "")
-    hub_auth.certfile = os.environ.get("JUPYTERHUB_SSL_CERTFILE", "")
-    hub_auth.keyfile = os.environ.get("JUPYTERHUB_SSL_KEYFILE", "")
-    if int(JH_MAJOR_VERSION) < 3:
-        hub_auth._api_request(
-            method="POST",
-            url=url_path_join(hub_auth.api_url, "batchspawner"),
-            json={"port": port},
-        )
-    else:
-        # Starting from JupyterHub 3.0.0, the method _api_request is
-        # asynchronous. Consequently the request is made using ASyncHTTPClient
-        # and hence json argument is no longer valid. We need to change it to
-        # body and encode it.
-        asyncio.run(
-            hub_auth._api_request(
-                method="POST",
-                url=url_path_join(hub_auth.api_url, "batchspawner"),
-                body=json.dumps({"port": port}),
-            )
-        )
-
-    cmd_path = which(sys.argv[1])
-    sys.argv = sys.argv[1:] + ["--port={}".format(port)]
-    run_path(cmd_path, run_name="__main__")
+class BatchSpawnerAPIHandler(APIHandler):
+    @web.authenticated
+    def post(self):
+        """POST set user spawner data"""
+        if hasattr(self, "current_user"):
+            # Jupyterhub compatability, (september 2018, d79a99323ef1d)
+            user = self.current_user
+        else:
+            # Previous jupyterhub, 0.9.4 and before.
+            user = self.get_current_user()
+        token = self.get_auth_token()
+        spawner = None
+        for s in user.spawners.values():
+            if s.api_token == token:
+                spawner = s
+                break
+        data = self.get_json_body()
+        for key, value in data.items():
+            if hasattr(spawner, key):
+                setattr(spawner, key, value)
+        self.finish(json.dumps({"message": "BatchSpawner data configured"}))
+        self.set_status(201)
 
 
-if __name__ == "__main__":
-    main()
+default_handlers.append((r"/api/batchspawner", BatchSpawnerAPIHandler))
